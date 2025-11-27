@@ -27,27 +27,79 @@ Este diretório contém as configurações necessárias para fazer o deployment 
 
 ```
 argocd/
-├── applications/          # Definições de ArgoCD Applications
-│   ├── ipfs-app.yaml                        # IPFS storage
-│   ├── firefly-signer-app.yaml              # FireFly Signer (x86_64)
-│   ├── firefly-signer-arm64-app.yaml        # FireFly Signer (ARM64)
-│   ├── firefly-gateway-app.yaml             # FireFly Gateway (x86_64)
-│   ├── firefly-gateway-arm64-app.yaml       # FireFly Gateway (ARM64)
-│   ├── firefly-multiparty-app.yaml          # FireFly Multiparty (x86_64) - inline values
-│   ├── firefly-multiparty-arm64-app.yaml    # FireFly Multiparty (ARM64) - inline values
-│   ├── multiparty-app.yaml                  # FireFly Multiparty (x86_64) - external values
-│   ├── multiparty-app-arm64.yaml            # FireFly Multiparty (ARM64) - external values
-│   ├── firefly-ingress-app.yaml             # Ingress HTTPS
-│   └── firefly-cors-middleware-app.yaml     # CORS Middleware
-├── values/               # Arquivos de valores para Helm (usados por alguns apps)
-│   ├── multiparty.yaml              # Values para multiparty x86_64
-│   ├── multiparty-arm64.yaml        # Values para multiparty ARM64
-│   ├── gateway.yaml                 # Values para gateway x86_64
-│   ├── gateway-arm64.yaml           # Values para gateway ARM64
-│   ├── ingress.yaml                 # Configuração de ingress
-│   └── firefly-cors-middleware.yaml # Configuração CORS
-└── backup/               # Arquivos de backup (não são usados)
+├── README.md                                # Este documento
+├── applications/                            # Definições de ArgoCD Applications
+│   ├── README.md                            # Documentação antiga (substituída)
+│   ├── ipfs-app.yaml                        # IPFS storage (Kubo v0.35.0)
+│   ├── firefly-signer-app.yaml              # Transaction Signer x86_64
+│   ├── firefly-signer-arm64-app.yaml        # Transaction Signer ARM64
+│   ├── firefly-gateway-app.yaml             # Gateway Mode x86_64 (valores inline)
+│   ├── firefly-gateway-arm64-app.yaml       # Gateway Mode ARM64 (valores inline)
+│   ├── firefly-multiparty-app.yaml          # Multiparty Mode x86_64 (valores inline)
+│   ├── firefly-multiparty-arm64-app.yaml    # Multiparty Mode ARM64 (valores inline)
+│   ├── multiparty-app.yaml                  # Multiparty Mode x86_64 (valores externos)
+│   ├── multiparty-app-arm64.yaml            # Multiparty Mode ARM64 (valores externos)
+│   ├── firefly-ingress-app.yaml             # Ingress HTTPS com TLS
+│   └── firefly-cors-middleware-app.yaml     # Traefik CORS Middleware
+├── values/                                  # Valores Helm e manifestos Kubernetes
+│   ├── multiparty.yaml                      # Helm values Multiparty x86_64
+│   ├── multiparty-arm64.yaml                # Helm values Multiparty ARM64
+│   ├── gateway.yaml                         # Helm values Gateway x86_64 (não usado)
+│   ├── gateway-arm64.yaml                   # Helm values Gateway ARM64 (não usado)
+│   ├── ingress.yaml                         # Manifesto Ingress Kubernetes
+│   ├── firefly-cors-middleware.yaml         # Manifesto Traefik Middleware
+│   ├── firefly-config.yaml                  # ConfigMap geral (não usado)
+│   └── ipfs.yaml                            # Config IPFS (não usado)
+└── backup/                                  # Configurações antigas/experimentais
+    ├── firefly-api-rewrite-middleware.yaml
+    ├── firefly-gateway-argocd-final.yaml
+    ├── firefly-gateway-argocd.yaml
+    ├── firefly-gateway-direct.yaml
+    ├── firefly-gateway-fixed.yaml
+    └── firefly-gateway-inline.yaml
 ```
+
+### Detalhamento dos Arquivos
+
+#### applications/
+
+**IPFS (Storage Layer)**
+- `ipfs-app.yaml`: Deploy do IPFS Kubo v0.35.0 com PersistentVolume de 10Gi. Usa `fullnameOverride: ipfs` para criar serviço `ipfs.firefly.svc`. Chart oficial Hyperledger.
+
+**FireFly Signer (Transaction Manager)**
+- `firefly-signer-app.yaml`: Signer x86_64 conectado ao Besu (`besu-node1-rpc.paladin.svc:8545`). Usa imagem oficial `ghcr.io/hyperledger/firefly-signer:latest`.
+- `firefly-signer-arm64-app.yaml`: Versão ARM64 com `nodeSelector: kubernetes.io/arch: arm64` e imagem customizada `ghcr.io/italoag/firefly-signer:latest`.
+
+**FireFly Gateway Mode (Single Node, Multi-Org)**
+- `firefly-gateway-app.yaml`: Gateway x86_64 com `multipartyEnabled: false`. Valores Helm inline. Inclui Core, DataExchange, EVMConnect, ERC1155, ERC20/721 connectors. Usa imagens oficiais Hyperledger.
+- `firefly-gateway-arm64-app.yaml`: Versão ARM64 com imagens customizadas `ghcr.io/italoag/*:latest-arm64` e `nodeSelector` em todos os componentes.
+
+**FireFly Multiparty Mode (True Multi-Party)**
+- `firefly-multiparty-app.yaml`: Multiparty x86_64 com `multipartyEnabled: true`. Valores Helm inline completos. InitContainers para criar database e aguardar DataExchange. Imagens oficiais.
+- `firefly-multiparty-arm64-app.yaml`: Versão ARM64 com imagens customizadas e `nodeSelector` em Core, EVMConnect, ERC1155, ERC20/721.
+- `multiparty-app.yaml`: Alternativa x86_64 que referencia `values/multiparty.yaml`. Arquivo mais compacto mas depende de valores externos.
+- `multiparty-app-arm64.yaml`: Alternativa ARM64 que referencia `values/multiparty-arm64.yaml`.
+
+**Ingress e Middleware**
+- `firefly-ingress-app.yaml`: ArgoCD App que aplica `values/ingress.yaml`. Cria Ingress com TLS para expor FireFly externamente em `firefly.cluster.eita.cloud`.
+- `firefly-cors-middleware-app.yaml`: ArgoCD App que aplica `values/firefly-cors-middleware.yaml`. Cria Traefik Middleware CRD para CORS.
+
+#### values/
+
+**Helm Values (para multiparty-app*.yaml)**
+- `multiparty.yaml`: Helm values completos para Multiparty Mode x86_64. Inclui todas as configs de Core, Signer, EVMConnect, Tokens, DataExchange.
+- `multiparty-arm64.yaml`: Versão ARM64 com imagens customizadas e `nodeSelector`.
+- `gateway.yaml` / `gateway-arm64.yaml`: Helm values para Gateway Mode. **Atualmente não usados** (apps gateway usam valores inline).
+
+**Manifestos Kubernetes Raw**
+- `ingress.yaml`: Manifesto Kubernetes `kind: Ingress` com TLS para expor FireFly.
+- `firefly-cors-middleware.yaml`: Manifesto Traefik `kind: Middleware` para CORS.
+- `firefly-config.yaml`: ConfigMap com configurações gerais. **Não usado atualmente**.
+- `ipfs.yaml`: Manifesto IPFS. **Não usado** (ipfs-app usa chart com valores inline).
+
+#### backup/
+
+Experimentos e configurações antigas do Gateway. Podem ser removidos após validação que não são mais necessários.
 
 ## 🎯 Modos de Deployment
 
@@ -263,9 +315,6 @@ kubectl run -it --rm debug --image=curlimages/curl --restart=Never -n firefly --
 2. Verificar se o initContainer de criação de database foi executado com sucesso
 3. Verificar se o DataExchange está rodando (`wait-for-dx` initContainer)
 
-#### Sandbox não está disponível
-O Sandbox foi removido das configurações de produção por questões de segurança. Se necessário para desenvolvimento, habilite manualmente editando `sandbox.enabled: true` nos valores.
-
 #### IPFS não responde
 1. Verificar se o PersistentVolume foi criado
 2. Verificar se o pod está com status `Running`
@@ -283,10 +332,9 @@ O Sandbox foi removido das configurações de produção por questões de segura
 - **TLS Certificates**: Gerados automaticamente pelo cert-manager com o ClusterIssuer `selfsigned-ca`
 
 ### Recomendações
-1. ❌ **NUNCA** habilitar Sandbox em produção
-2. ✅ Usar Secrets do Kubernetes para senhas
-3. ✅ Usar certificados válidos (Let's Encrypt) em produção
-4. ✅ Habilitar autenticação e autorização no FireFly Core
+1. ✅ Usar Secrets do Kubernetes para senhas (atualmente hardcoded)
+2. ✅ Usar certificados válidos (Let's Encrypt) em produção
+3. ✅ Habilitar autenticação e autorização no FireFly Core
 
 ## 🔄 Sincronização ArgoCD
 
@@ -341,9 +389,6 @@ Existem duas abordagens para deployment:
 2. **External values** (`multiparty-app*.yaml`) - Valores Helm em arquivos separados em `values/`
 
 A abordagem inline é recomendada por ser autocontida e mais fácil de versionar.
-
-### Sandbox
-Os arquivos de configuração do Sandbox foram removidos (`firefly-sandbox*.yaml`) pois o Sandbox não deve ser deployado em ambientes de produção.
 
 ### Backup
 O diretório `backup/` contém configurações antigas que podem ser removidas se não forem mais necessárias.
