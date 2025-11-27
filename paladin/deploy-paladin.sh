@@ -117,7 +117,7 @@ kubectl rollout status deployment/cert-manager-cainjector -n cert-manager --time
 
 # Step 1: Instalar CRDs do Paladin
 info "Adicionando repositório Helm do Paladin..."
-helm repo add paladin https://LF-Decentralized-Trust-labs.github.io/paladin --force-update
+helm repo add paladin https://lfdt-paladin.github.io/paladin --force-update
 info "Instalando CRDs do Paladin..."
 helm upgrade --install paladin-crds paladin/paladin-operator-crd
 

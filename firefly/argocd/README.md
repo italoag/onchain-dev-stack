@@ -15,7 +15,7 @@ Este diretório contém as configurações necessárias para fazer o deployment 
   - URL: `postgres://postgres:<password>@postgres-postgresql.database.svc:5432/`
   - Databases necessários: `firefly`, `firefly_gateway`
 - **Besu/Ethereum Node**: Node blockchain para o Signer
-  - URL: `http://besu-node1-rpc.paladin.svc:8545`
+  - URL: `http://besu-node1.paladin.svc:8545`
   - Chain ID: `1337`
 
 ### Repositórios Git
@@ -67,7 +67,7 @@ argocd/
 - `ipfs-app.yaml`: Deploy do IPFS Kubo v0.35.0 com PersistentVolume de 10Gi. Cria serviço `ipfs-ipfs.firefly.svc` (nome padrão do chart). Chart oficial Hyperledger.
 
 **FireFly Signer (Transaction Manager)**
-- `firefly-signer-app.yaml`: Signer x86_64 conectado ao Besu (`besu-node1-rpc.paladin.svc:8545`). Usa imagem oficial `ghcr.io/hyperledger/firefly-signer:latest`.
+- `firefly-signer-app.yaml`: Signer x86_64 conectado ao Besu (`besu-node1.paladin.svc:8545`). Usa imagem oficial `ghcr.io/hyperledger/firefly-signer:latest`.
 - `firefly-signer-arm64-app.yaml`: Versão ARM64 com `nodeSelector: kubernetes.io/arch: arm64` e imagem customizada `ghcr.io/italoag/firefly-signer:latest`.
 
 **FireFly Gateway Mode (Single Node, Multi-Org)**
@@ -322,8 +322,8 @@ kubectl run -it --rm debug --image=curlimages/curl --restart=Never -n firefly --
 
 #### Signer não conecta ao Besu
 1. Verificar se o Besu está rodando: `kubectl get pods -n paladin`
-2. Verificar conectividade: `kubectl run -it --rm debug --image=curlimages/curl --restart=Never -- curl http://besu-node1-rpc.paladin.svc:8545`
-3. Verificar se o `chainId` está correto
+2. Verificar conectividade: `kubectl run -it --rm debug --image=curlimages/curl --restart=Never -- curl http://besu-node1.paladin.svc:8545`
+3. Verificar se o `chainId` está correto (1337 para setup local)
 
 ## 🔐 Segurança
 

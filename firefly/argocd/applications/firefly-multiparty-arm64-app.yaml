@@ -66,13 +66,13 @@ spec:
             serviceMonitor:
               enabled: true
           livenessProbe:
-            initialDelaySeconds: 300
-            periodSeconds: 10
-            failureThreshold: 6
+            initialDelaySeconds: 900
+            periodSeconds: 30
+            failureThreshold: 10
           readinessProbe:
-            initialDelaySeconds: 300
-            periodSeconds: 10
-            failureThreshold: 6
+            initialDelaySeconds: 900
+            periodSeconds: 30
+            failureThreshold: 10
           initContainers: |
               - name: wait-for-dx
                 image: busybox:1.36.1
@@ -131,9 +131,9 @@ spec:
           tlsSecret:
             enabled: false
 
-        # Sandbox habilitado
+        # Sandbox desabilitado
         sandbox:
-          enabled: true
+          enabled: false
           image:
             repository: ghcr.io/italoag/firefly-sandbox
             tag: "latest-arm64"

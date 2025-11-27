@@ -17,7 +17,7 @@ spec:
           tag: "latest"
 
         backend:
-          url: "http://besu-node1-rpc.paladin.svc:8545"
+          url: "http://besu-node1.paladin.svc:8545"
           chainId: 1337
 
         signer:

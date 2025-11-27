@@ -6,7 +6,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: 'https://LF-Decentralized-Trust-labs.github.io/paladin'
+    repoURL: 'https://lfdt-paladin.github.io/paladin'
     chart: paladin-operator
     targetRevision: 0.1.0 # Replace with the desired chart version
   destination:

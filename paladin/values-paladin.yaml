@@ -11,8 +11,8 @@ operator:
   name: paladin-operator
   namespace: "" # DEPRECATED: Use the namespace field in the HelmRelease instead. e.g. helm install ... --namespace <namespace>
   image:
-    repository: docker.io/lfdecentralizedtrustlabs/paladin-operator
-    tag: v0.8.1
+    repository: docker.io/lfdecentralizedtrust/paladin-operator
+    tag: latest
     pullPolicy: Always
   serviceAccount:
     create: true
@@ -105,8 +105,8 @@ installCRDs: false
 paladin:
   nodeNamePrefix: node
   image:
-    repository: docker.io/lfdecentralizedtrustlabs/paladin
-    tag: v0.8.1
+    repository: docker.io/lfdecentralizedtrust/paladin
+    tag: latest
     pullPolicy: Always
   labels:
     app: paladin

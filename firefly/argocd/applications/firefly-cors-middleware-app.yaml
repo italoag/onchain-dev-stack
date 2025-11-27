@@ -9,7 +9,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/italoag/bacen-drex-k8s-dev-stack.git
+    repoURL: https://github.com/italoag/onchain-dev-stack.git
     targetRevision: main
     path: firefly/argocd
     directory:
