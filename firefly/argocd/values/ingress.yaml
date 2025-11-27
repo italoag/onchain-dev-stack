@@ -40,38 +40,3 @@ spec:
               name: firefly
               port:
                 number: 5100
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: firefly-sandbox-ingress
-  namespace: firefly
-  annotations:
-    cert-manager.io/cluster-issuer: "letsencrypt-certmanager"
-    traefik.ingress.kubernetes.io/router.entrypoints: "websecure"
-spec:
-  ingressClassName: traefik
-  tls:
-  - hosts:
-    - firefly-sandbox.cluster.eita.cloud
-    secretName: firefly-sandbox-tls  # Esse secret será criado automaticamente pelo cert-manager
-  rules:
-  - host: firefly-sandbox.cluster.eita.cloud
-    http:
-      paths:
-        # Regra para API do Sandbox
-        - path: /api
-          pathType: Prefix
-          backend:
-            service:
-              name: firefly-sandbox
-              port:
-                number: 3001
-        # Regra para servir o Sandbox UI
-        - path: /
-          pathType: Prefix
-          backend:
-            service:
-              name: firefly-sandbox
-              port:
-                number: 3001
