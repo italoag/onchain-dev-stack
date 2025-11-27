@@ -64,7 +64,7 @@ argocd/
 #### applications/
 
 **IPFS (Storage Layer)**
-- `ipfs-app.yaml`: Deploy do IPFS Kubo v0.35.0 com PersistentVolume de 10Gi. Usa `fullnameOverride: ipfs` para criar serviço `ipfs.firefly.svc`. Chart oficial Hyperledger.
+- `ipfs-app.yaml`: Deploy do IPFS Kubo v0.35.0 com PersistentVolume de 10Gi. Cria serviço `ipfs-ipfs.firefly.svc` (nome padrão do chart). Chart oficial Hyperledger.
 
 **FireFly Signer (Transaction Manager)**
 - `firefly-signer-app.yaml`: Signer x86_64 conectado ao Besu (`besu-node1-rpc.paladin.svc:8545`). Usa imagem oficial `ghcr.io/hyperledger/firefly-signer:latest`.
@@ -251,8 +251,8 @@ kubectl apply -f argocd/applications/firefly-ingress-app.yaml
 - UI: `https://firefly.cluster.eita.cloud/ui/`
 
 **Serviços Internos:**
-- IPFS API: `http://ipfs.firefly.svc:5001`
-- IPFS Gateway: `http://ipfs.firefly.svc:8080`
+- IPFS API: `http://ipfs-ipfs.firefly.svc:5001`
+- IPFS Gateway: `http://ipfs-ipfs.firefly.svc:8080`
 - Signer: `http://firefly-signer.firefly.svc:8545`
 
 ## 🔍 Verificação e Troubleshooting
@@ -287,11 +287,11 @@ kubectl logs -n firefly deployment/ipfs -f
 ```
 
 ### Testar Conectividade
-
 **IPFS:**
 ```bash
-kubectl run -it --rm debug --image=curlimages/curl --restart=Never -n firefly -- \
-  curl http://ipfs.firefly.svc:5001/api/v0/version
+kubectl run -it --rm debug --image=curlimages/curl --restart=Never -n firefly -- \\
+  curl http://ipfs-ipfs.firefly.svc:5001/api/v0/version
+```
 ```
 
 **FireFly API:**

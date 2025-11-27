@@ -34,8 +34,8 @@ config:
   postgresUrl: "postgres://postgres:Bigode%231404%21@postgres-postgresql.database.svc:5432/firefly?sslmode=disable"
   postgresAutomigrate: true
 
-  ipfsApiUrl: "http://ipfs.firefly.svc:5001"
-  ipfsGatewayUrl: "http://ipfs.firefly.svc:8080"
+  ipfsApiUrl: "http://ipfs-ipfs.firefly.svc:5001"
+  ipfsGatewayUrl: "http://ipfs-ipfs.firefly.svc:8080"
 
   addresssResolverUrlTemplate: "http://address-resolver.firefly-os/wallets/{{.Key}}"
 
