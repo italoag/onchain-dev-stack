@@ -11,6 +11,8 @@ spec:
     path: charts/ipfs
     helm:
       values: |
+        fullnameOverride: ipfs
+        
         image:
           repository: ipfs/kubo
           pullPolicy: IfNotPresent
