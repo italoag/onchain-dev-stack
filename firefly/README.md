@@ -2,7 +2,7 @@
 
 ## Resumo das Configurações Automáticas
 
-### 1. Configurações Corrigidas no firefly-multiparty.yaml
+### 1. Configurações no firefly-multiparty.yaml
 
 #### 1.1 Configurações Básicas
 
