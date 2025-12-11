@@ -8,7 +8,7 @@ readonly RELEASE="cert-manager"         # Nome do Helm release
 readonly CHART="jetstack/cert-manager"  # Chart do cert-manager
 readonly CHART_VERSION="v1.17.1"        # Versão do chart
 readonly TIMEOUT="600s"                 # Timeout para operações
-readonly EMAIL=${EMAIL:-"admin@example.com"} # Email para Let's Encrypt (substituir se definido)
+readonly EMAIL=${EMAIL:-"italo@gmail.com"} # Email para Let's Encrypt (use um email válido, não example.com)
 readonly LETSENCRYPT_URL="https://acme-v02.api.letsencrypt.org/directory"
 readonly TEMP_CERT_DIR="/tmp/certs"
 readonly CERT_SECRET_NAME="corporate-ca-certs"
@@ -173,20 +173,48 @@ check_corporate_network() {
   domain=$(echo "$LETSENCRYPT_URL" | sed -E 's|^https://([^/]+)/.*|\1|')
   info "Domínio extraído: $domain"
   
-  # Tenta diversos métodos para obter o certificado
-  if ! openssl s_client -showcerts -connect "$domain:443" -servername "$domain" </dev/null 2>/dev/null | 
-       awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/ {print}' > "$TEMP_CERT_DIR/cert_chain.pem"; then
-    warn "Não foi possível conectar a $domain usando OpenSSL. Tentando método alternativo..."
+  # Tenta obter certificados usando OpenSSL (aceita qualquer certificado para análise)
+  local openssl_output
+  openssl_output=$(mktemp)
+  
+  # Usa perl para timeout (compatível com macOS)
+  if ! perl -e 'alarm shift @ARGV; exec @ARGV' 10 openssl s_client -showcerts -connect "$domain:443" -servername "$domain" </dev/null >"$openssl_output" 2>&1; then
+    warn "OpenSSL retornou erro, mas vamos verificar o conteúdo obtido..."
+  fi
+  
+  # Extrai certificados do output
+  awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/ {print}' "$openssl_output" > "$TEMP_CERT_DIR/cert_chain.pem"
+  
+  # Se não conseguiu extrair certificados mas temos output do OpenSSL, tenta obter info com curl
+  if [[ ! -s "$TEMP_CERT_DIR/cert_chain.pem" ]]; then
+    warn "Não foi possível extrair certificados do OpenSSL."
     
     # Método alternativo usando curl se disponível
     if command -v curl &>/dev/null; then
-      warn "Tentando obter informações com curl..."
-      curl -v --connect-timeout 10 "https://$domain" 2>&1 | grep -i "issuer\|subject\|certificate" >&2
+      info "Tentando obter informações com curl..."
+      local curl_output
+      curl_output=$(mktemp)
+      curl -v --connect-timeout 10 "https://$domain" >/dev/null 2>"$curl_output" || true
+      
+      # Verifica se o curl detectou proxy corporativo
+      if grep -qi "netskope\|zscaler\|proxy\|corporate" "$curl_output"; then
+        info "🔒 Detectado proxy corporativo através do curl!"
+        cat "$curl_output" | grep -i "issuer\|subject\|certificate" >&2 || true
+        rm -f "$curl_output" "$openssl_output"
+        
+        # Tenta extrair certificados do sistema para usar
+        extract_system_certificates
+        return 0
+      fi
+      rm -f "$curl_output"
     fi
     
+    rm -f "$openssl_output"
     warn "Não foi possível obter certificados. Continuando sem verificações adicionais."
     return 1
   fi
+  
+  rm -f "$openssl_output"
   
   # Verifica se conseguimos obter um certificado válido
   if ! openssl x509 -in "$TEMP_CERT_DIR/cert_chain.pem" -noout &>/dev/null; then
@@ -233,13 +261,52 @@ check_corporate_network() {
   # Em redes corporativas, extrai e salva todos os certificados da cadeia
   if [[ "$is_corporate" == "true" ]]; then
     info "🔒 Detectada rede corporativa com intercepção SSL!"
-    extract_corporate_certificates "$domain"
-    return 0
+    info "Emissor corporativo: $issuer_cn / $issuer_org"
+    
+    # Tenta extrair certificados corporativos
+    if extract_corporate_certificates "$domain"; then
+      info "✅ Certificados corporativos extraídos com sucesso"
+      return 0
+    else
+      warn "Falha ao extrair certificados específicos, tentando certificados do sistema..."
+      if extract_system_certificates; then
+        return 0
+      else
+        warn "Não foi possível extrair certificados. Continuando sem eles."
+        return 1
+      fi
+    fi
   else
     info "✅ Certificado parece ser autêntico do Let's Encrypt. Nenhuma ação necessária."
     rm -rf "$TEMP_CERT_DIR"
     return 1
   fi
+}
+
+# Extrai certificados do sistema quando necessário
+extract_system_certificates() {
+  info "Extraindo certificado Netskope específico..."
+  
+  mkdir -p "$TEMP_CERT_DIR"
+  
+  # Em vez de copiar todo o bundle do sistema (que é muito grande),
+  # vamos extrair apenas o certificado Netskope do Let's Encrypt
+  local domain="acme-v02.api.letsencrypt.org"
+  
+  info "Tentando extrair certificado diretamente de $domain..."
+  
+  # Tenta extrair com openssl s_client (ignora erros de verificação)
+  if echo | openssl s_client -connect "$domain:443" -servername "$domain" 2>/dev/null | 
+     awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/ {print}' > "$TEMP_CERT_DIR/netskope_ca.pem"; then
+    
+    if [[ -s "$TEMP_CERT_DIR/netskope_ca.pem" ]] && openssl x509 -noout -in "$TEMP_CERT_DIR/netskope_ca.pem" &>/dev/null; then
+      info "✅ Certificado Netskope extraído com sucesso"
+      return 0
+    fi
+  fi
+  
+  warn "Não foi possível extrair certificado Netskope"
+  return 1
 }
 
 # Extrai certificados corporativos para uso no cluster
@@ -255,15 +322,9 @@ extract_corporate_certificates() {
   
   # Tentativa 1: Método mais completo para obter todos os certificados
   local temp_output="$TEMP_CERT_DIR/openssl_output.txt"
-  local timeout_cmd=""
   
-  # Verifica se o timeout está disponível (evita travamentos)
-  if command -v timeout &>/dev/null; then
-    timeout_cmd="timeout 30"
-  fi
-  
-  # Tenta obter os certificados (com timeout se possível)
-  if ! $timeout_cmd openssl s_client -showcerts -connect "$domain:443" -servername "$domain" </dev/null >$temp_output 2>&1; then
+  # Tenta obter os certificados (usa perl para timeout compatível com macOS)
+  if ! perl -e 'alarm shift @ARGV; exec @ARGV' 30 openssl s_client -showcerts -connect "$domain:443" -servername "$domain" </dev/null >$temp_output 2>&1; then
     warn "Erro ao conectar usando OpenSSL. Verificando conteúdo obtido mesmo assim..."
   fi
   
@@ -314,7 +375,7 @@ extract_corporate_certificates() {
     
     # Método 2: Abordagem simplificada - extrai qualquer bloco que pareça com certificado
     info "Usando método alternativo 1 para extração..."
-    $timeout_cmd openssl s_client -connect "$domain:443" -servername "$domain" </dev/null 2>/dev/null | 
+    perl -e 'alarm shift @ARGV; exec @ARGV' 30 openssl s_client -connect "$domain:443" -servername "$domain" </dev/null 2>/dev/null | 
       sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > "$TEMP_CERT_DIR/cert1.pem"
     
     if ! openssl x509 -noout -in "$TEMP_CERT_DIR/cert1.pem" &>/dev/null; then
@@ -471,11 +532,12 @@ create_cert_config() {
   
   # Verifica se o secret já existe
   if kubectl -n "$NS" get secret "$CERT_SECRET_NAME" >/dev/null 2>&1; then
-    info "Secret '$CERT_SECRET_NAME' já existe. Atualizando..."
+    info "Secret '$CERT_SECRET_NAME' já existe. Substituindo..."
+    # Deleta e recria para evitar problemas com annotations muito grandes
+    kubectl -n "$NS" delete secret "$CERT_SECRET_NAME" --ignore-not-found=true
     if ! kubectl -n "$NS" create secret generic "$CERT_SECRET_NAME" \
-          --from-file=ca.crt="$TEMP_CERT_DIR/combined.pem" \
-          --dry-run=client -o yaml | kubectl apply -f -; then
-      err "Falha ao atualizar o Secret '$CERT_SECRET_NAME'"
+          --from-file=ca.crt="$TEMP_CERT_DIR/combined.pem"; then
+      err "Falha ao recriar o Secret '$CERT_SECRET_NAME'"
       return 1
     fi
   else
@@ -525,7 +587,9 @@ rollback() {
   kubectl delete crd -l app.kubernetes.io/name=cert-manager 2>/dev/null || true
   
   warn "Removendo namespace se vazio..."
-  if [[ $(kubectl get all -n "$NS" 2>/dev/null | wc -l) -le 1 ]]; then
+  local resource_count
+  resource_count=$(kubectl get all -n "$NS" 2>/dev/null | wc -l | tr -d '[:space:]')
+  if [[ "$resource_count" -le 1 ]]; then
     kubectl delete ns "$NS" --wait=false 2>/dev/null || true
   fi
   
@@ -551,7 +615,7 @@ cleanup_crashing_pods() {
   
   # Verifica se há algum pod do cert-manager
   local pod_count
-  pod_count=$(kubectl get pods -n "$NS" -l app.kubernetes.io/instance="$RELEASE" --no-headers 2>/dev/null | wc -l)
+  pod_count=$(kubectl get pods -n "$NS" -l app.kubernetes.io/instance="$RELEASE" --no-headers 2>/dev/null | wc -l | tr -d '[:space:]')
   
   if [[ "$pod_count" -eq 0 ]]; then
     info "Não foram encontrados pods do cert-manager no namespace $NS."
@@ -608,6 +672,7 @@ wait_for_pods() {
     deployments=$(kubectl get deployments -n "$NS" -l app.kubernetes.io/instance="$RELEASE" 2>/dev/null)
     local deployment_count
     deployment_count=$(echo "$deployments" | grep -c "$RELEASE" 2>/dev/null || echo "0")
+    deployment_count=$(echo "$deployment_count" | tr -d '[:space:]')
     
     if [[ "$deployment_count" -eq 0 ]]; then
       warn "Nenhum deployment do cert-manager encontrado. Verificando se o Helm Release existe..."
@@ -654,7 +719,8 @@ wait_for_pods() {
     local total_pods
     
     # Conta total de pods do cert-manager
-    total_pods=$(echo "$pod_status" | grep -c "$RELEASE" || echo "0")
+    total_pods=$(echo "$pod_status" | grep -c "$RELEASE" 2>/dev/null || echo "0")
+    total_pods=$(echo "$total_pods" | tr -d '[:space:]')
     
     if [[ "$total_pods" -eq 0 ]]; then
       warn "Nenhum pod do cert-manager encontrado ainda. Aguardando criação..."
@@ -678,7 +744,8 @@ wait_for_pods() {
     fi
     
     # Conta pods que estão prontos (Running e Ready)
-    ready_pods=$(kubectl get pods -n "$NS" -l app.kubernetes.io/instance="$RELEASE" -o jsonpath='{range .items[*]}{.status.phase}{"\t"}{range .status.conditions[?(@.type=="Ready")]}{.status}{end}{"\n"}{end}' 2>/dev/null | grep -c "Running.*True" || echo "0")
+    ready_pods=$(kubectl get pods -n "$NS" -l app.kubernetes.io/instance="$RELEASE" -o jsonpath='{range .items[*]}{.status.phase}{"\t"}{range .status.conditions[?(@.type=="Ready")]}{.status}{end}{"\n"}{end}' 2>/dev/null | grep -c "Running.*True" 2>/dev/null || echo "0")
+    ready_pods=$(echo "$ready_pods" | tr -d '[:space:]')
     
     if [[ "$ready_pods" -eq "$total_pods" ]] && [[ "$ready_pods" -ge "$total_expected" ]]; then
       all_ready=true
@@ -753,35 +820,8 @@ install_cert_manager() {
     "--set" "installCRDs=true"
   )
   
-  # Valores para certificados corporativos
-  if [[ "$has_corporate_certs" == "true" ]]; then
-    info "Configurando montagem de certificados corporativos..."
-    extra_values=(
-      # Configurações para controller
-      "--set" "volumeMounts[0].name=ca-certs"
-      "--set" "volumeMounts[0].mountPath=/etc/ssl/certs/ca-certificates.crt"
-      "--set" "volumeMounts[0].subPath=ca.crt"
-      "--set" "volumes[0].name=ca-certs"
-      "--set" "volumes[0].secret.secretName=$CERT_SECRET_NAME"
-      # Configurações para webhook
-      "--set" "webhook.volumeMounts[0].name=ca-certs"
-      "--set" "webhook.volumeMounts[0].mountPath=/etc/ssl/certs/ca-certificates.crt"
-      "--set" "webhook.volumeMounts[0].subPath=ca.crt"
-      "--set" "webhook.volumes[0].name=ca-certs"
-      "--set" "webhook.volumes[0].secret.secretName=$CERT_SECRET_NAME"
-      # Configurações para cainjector
-      "--set" "cainjector.volumeMounts[0].name=ca-certs"
-      "--set" "cainjector.volumeMounts[0].mountPath=/etc/ssl/certs/ca-certificates.crt"
-      "--set" "cainjector.volumeMounts[0].subPath=ca.crt"
-      "--set" "cainjector.volumes[0].name=ca-certs"
-      "--set" "cainjector.volumes[0].secret.secretName=$CERT_SECRET_NAME"
-    )
-  else
-    extra_values=()
-  fi
-  
-  # Combinando os arrays de valores
-  local all_values=("${base_values[@]}" "${extra_values[@]}")
+  # Não usamos mais arrays --set, vamos usar apenas o arquivo YAML
+  # que será criado abaixo com todas as configurações
   
   # Força desinstalação completa se FORCE_REINSTALL estiver ativado
   if [[ "$FORCE_REINSTALL" == "true" ]] && helm status "$RELEASE" -n "$NS" >/dev/null 2>&1; then
@@ -812,15 +852,19 @@ EOF
   # Adiciona configurações para certificados corporativos se necessário
   if [[ "$has_corporate_certs" == "true" ]]; then
     cat >> "$values_file" <<EOF
-# Configurações para montar certificados corporativos
+# Configurações para controller
 volumes:
 - name: ca-certs
   secret:
     secretName: $CERT_SECRET_NAME
 volumeMounts:
 - name: ca-certs
-  mountPath: /etc/ssl/certs/ca-certificates.crt
+  mountPath: /etc/ssl/certs/corporate-ca.crt
   subPath: ca.crt
+  readOnly: true
+extraEnv:
+- name: SSL_CERT_FILE
+  value: /etc/ssl/certs/corporate-ca.crt
 
 # Configurações para webhook
 webhook:
@@ -830,8 +874,12 @@ webhook:
       secretName: $CERT_SECRET_NAME
   volumeMounts:
   - name: ca-certs
-    mountPath: /etc/ssl/certs/ca-certificates.crt
+    mountPath: /etc/ssl/certs/corporate-ca.crt
     subPath: ca.crt
+    readOnly: true
+  extraEnv:
+  - name: SSL_CERT_FILE
+    value: /etc/ssl/certs/corporate-ca.crt
 
 # Configurações para cainjector
 cainjector:
@@ -841,8 +889,12 @@ cainjector:
       secretName: $CERT_SECRET_NAME
   volumeMounts:
   - name: ca-certs
-    mountPath: /etc/ssl/certs/ca-certificates.crt
+    mountPath: /etc/ssl/certs/corporate-ca.crt
     subPath: ca.crt
+    readOnly: true
+  extraEnv:
+  - name: SSL_CERT_FILE
+    value: /etc/ssl/certs/corporate-ca.crt
 EOF
   fi
   
@@ -850,7 +902,8 @@ EOF
   
   # Executa o comando Helm
   local result=0
-  if helm status "$RELEASE" -n "$NS" >/dev/null 2>&1; then
+  # Verifica se há um release REALMENTE instalado (não apenas na história)
+  if helm list -n "$NS" | grep -q "^$RELEASE\s"; then
     info "Release existente encontrado. Executando upgrade..."
     helm upgrade "$RELEASE" "$CHART" \
       --namespace "$NS" \
@@ -901,6 +954,17 @@ verify_crds() {
 create_cluster_issuer() {
   info "Criando ClusterIssuer para Let's Encrypt..."
   
+  # Valida o email antes de criar o ClusterIssuer
+  local email_to_use="$EMAIL"
+  if [[ "$email_to_use" == *"example.com"* ]]; then
+    warn "Email 'example.com' não é permitido pelo Let's Encrypt!"
+    warn "Por favor, defina um email válido com: export EMAIL='seu-email@dominio.com'"
+    warn "Usando email padrão alternativo: italo@gmail.com"
+    email_to_use="italo@gmail.com"
+  fi
+  
+  info "Email para registro ACME: $email_to_use"
+  
   # Criar arquivo temporário com a configuração do ClusterIssuer
   cat > "letsencrypt-certmanager.yaml" <<EOF
 apiVersion: cert-manager.io/v1
@@ -910,7 +974,7 @@ metadata:
   namespace: cert-manager
 spec:
   acme:
-    email: ${EMAIL}
+    email: ${email_to_use}
     server: https://acme-v02.api.letsencrypt.org/directory
     privateKeySecretRef:
       name: letsencrypt-certmanager
@@ -1019,7 +1083,12 @@ show_diagnostics() {
   
   # Verifica configuração de rede para o Let's Encrypt
   info "Verificando acesso a servidores ACME do Let's Encrypt:"
-  timeout 5 curl -s -o /dev/null -w "%{http_code}" "$LETSENCRYPT_URL" || echo "Não foi possível conectar ao Let's Encrypt"
+  # macOS não tem timeout por padrão, então usamos curl com timeout
+  if command -v curl &>/dev/null; then
+    curl --connect-timeout 5 -s -o /dev/null -w "%{http_code}" "$LETSENCRYPT_URL" 2>/dev/null || echo "Não foi possível conectar ao Let's Encrypt"
+  else
+    echo "curl não disponível para teste de conectividade"
+  fi
   
   info "=== FIM DO DIAGNÓSTICO ==="
 }
